@@ -7,10 +7,9 @@ import (
 )
 
 type MetricConfig struct {
-	ID          string
-	Window      time.Duration
-	Percentiles []int // These are the percentiles for which we'll calculate latency
-	MaxSamples  int   // Won't accept more that this number of latency values for calculating
+	ID         string
+	Window     time.Duration
+	MaxSamples int // Won't accept more that this number of latency values for calculating
 	// percentile
 	CreatedAt time.Time
 }

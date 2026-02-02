@@ -4,6 +4,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -63,10 +65,36 @@ func (m *Metric) CalculateLatency() MetricSnapshot {
 		MetricID: m.Config.ID,
 		Window:   m.Config.Window,
 		Count:    len(active),
-		// THIS IS WHERE THE IMPLEMENTATION OF CALCULATION OF LATENCY
-		// NEEDS TO BE MADE FOR P99,P95,P50
 	}
+	if len(active) > 0 {
+		latencies := make([]time.Duration, 0)
+		for _, l := range active {
+			latencies = append(latencies, l.LatencyVal)
+		}
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+
+		snapshot.P50 = computePercentile(latencies, 50)
+		snapshot.P95 = computePercentile(latencies, 95)
+		snapshot.P99 = computePercentile(latencies, 99)
+	}
+	// Since LatencySample has time.Duration as data type, it cannot be directly compared
 	return snapshot
+}
+
+func computePercentile(latencies []time.Duration, percentile int) *time.Duration {
+	N := len(latencies)
+	if N == 0 {
+		return nil
+	}
+	idxPercentile := int(math.Ceil(((float64(percentile) / 100.0) * float64(N)))) - 1
+	if idxPercentile < 0 {
+		idxPercentile = 0
+	}
+	if idxPercentile >= N {
+		idxPercentile = N - 1
+	}
+	val := latencies[idxPercentile]
+	return &val
 }
 
 // If you tried to do this: var m map[string]*Metric (without make)
@@ -105,4 +133,24 @@ func (ms *MetricStore) getMetric(id string) (*Metric, bool) {
 
 	metric, ok := ms.Metrics[id]
 	return metric, ok
+}
+
+func (ms *MetricStore) getOrCreateMetric(id string) *Metric {
+	// Here we're not using RLock since, it specifically means that
+	// no goroutine will write to a shared object, only reads will happend
+	// which isn't the case here is it? Refer later part of function!
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if metric, ok := ms.Metrics[id]; ok {
+		return metric
+	}
+	metric := &Metric{
+		Config:  defaultMetricConfig(id),
+		Samples: make([]LatencySample, 0),
+	}
+
+	ms.Metrics = make(map[string]*Metric)
+	ms.Metrics[id] = metric
+	return metric
 }
